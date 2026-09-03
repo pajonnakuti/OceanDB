@@ -24,6 +24,9 @@
     <!-- AlaSQL Engine -->
     <script src="https://cdn.jsdelivr.net/npm/alasql@4"></script>
 
+    <!-- PapaParse CSV Parser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
     <!-- pako gzip decompressor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 
@@ -309,7 +312,16 @@
                 const arrayBuffer = await csvResp.arrayBuffer();
                 const decompressed = pako.inflate(new Uint8Array(arrayBuffer), { to: 'string' });
 
-                // 3. Register Tables in AlaSQL Engine
+                // 3. Parse CSV robustly with PapaParse
+                document.getElementById('loading-progress').innerText = "Parsing CSV records into memory...";
+                const parsed = Papa.parse(decompressed, { 
+                    header: true, 
+                    dynamicTyping: true,
+                    skipEmptyLines: true 
+                });
+                dbObs = parsed.data;
+
+                // 4. Register Tables in AlaSQL Engine
                 document.getElementById('loading-progress').innerText = "Registering In-Browser SQL Tables...";
                 
                 alasql("CREATE TABLE argo_floats");
@@ -317,25 +329,6 @@
 
                 alasql("CREATE TABLE argo_profiles");
                 alasql.tables.argo_profiles.data = dbProfiles;
-
-                const parsedObs = alasql.parse('SELECT * FROM CSV(?, {headers:true})', [decompressed]);
-                dbObs = alasql(parsedObs[0]);
-                
-                // Convert numeric strings to numbers
-                dbObs.forEach(r => {
-                    r.obs_id = Number(r.obs_id);
-                    r.profile_id = Number(r.profile_id);
-                    r.wmoid = Number(r.wmoid);
-                    r.cycle = Number(r.cycle);
-                    r.latitude = Number(r.latitude);
-                    r.longitude = Number(r.longitude);
-                    r.pressure_dbar = r.pressure_dbar !== "" ? Number(r.pressure_dbar) : null;
-                    r.temperature_c = r.temperature_c !== "" ? Number(r.temperature_c) : null;
-                    r.salinity_psu = r.salinity_psu !== "" ? Number(r.salinity_psu) : null;
-                    r.dissolved_oxygen_umol = r.dissolved_oxygen_umol !== "" ? Number(r.dissolved_oxygen_umol) : null;
-                    r.chlorophyll_a_mg_m3 = r.chlorophyll_a_mg_m3 !== "" ? Number(r.chlorophyll_a_mg_m3) : null;
-                    r.backscatter_bbp700 = r.backscatter_bbp700 !== "" ? Number(r.backscatter_bbp700) : null;
-                });
 
                 alasql("CREATE TABLE argo_observations");
                 alasql.tables.argo_observations.data = dbObs;
@@ -491,7 +484,6 @@
             if (!hasPres) return;
 
             const pres = data.map(r => r.pressure_dbar);
-            const wmos = data.map(r => r.wmoid ? String(r.wmoid) : 'Profile');
 
             const layoutBase = {
                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -562,7 +554,7 @@
 
         function exportCSV() {
             if (currentQueryResult.length === 0) return;
-            const csv = alasql('SELECT * FROM ?', [currentQueryResult]);
+            const csv = Papa.unparse(currentQueryResult);
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
