@@ -367,7 +367,7 @@ elif df is not None:
     tab1, tab2, tab3 = st.tabs(["📊 Data Table", "🗺️ Geographic Map", "📉 Vertical CTD & BGC Profiles"])
 
     with tab1:
-        st.dataframe(df, width="stretch")
+        st.dataframe(df, use_container_width=True)
 
     with tab2:
         cols = {c.lower(): c for c in df.columns}
@@ -401,7 +401,7 @@ elif df is not None:
             )
             fig_map.update_traces(marker=dict(size=9, opacity=0.85))
             fig_map.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=550)
-            st.plotly_chart(fig_map, width="stretch")
+            st.plotly_chart(fig_map, use_container_width=True)
         else:
             st.info("Include `latitude` and `longitude` columns in your SELECT query to display spatial distribution on the map.")
 
@@ -470,7 +470,7 @@ elif df is not None:
             if profile_plots:
                 for p_fig in profile_plots:
                     p_fig.update_layout(height=450)
-                    st.plotly_chart(p_fig, width="stretch")
+                    st.plotly_chart(p_fig, use_container_width=True)
             else:
                 st.info("Include observation parameter columns (`temperature_c`, `salinity_psu`, `dissolved_oxygen_umol`, `chlorophyll_a_mg_m3`) to render vertical profiles.")
         else:
