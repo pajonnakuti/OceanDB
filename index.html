@@ -435,8 +435,8 @@
         function renderMap(data) {
             if (!mapInstance) {
                 mapInstance = L.map('map', { zoomControl: true }).setView([15.0, 75.0], 5);
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    attribution: '&copy; OpenStreetMap &copy; CARTO',
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
                     maxZoom: 18
                 }).addTo(mapInstance);
             }
