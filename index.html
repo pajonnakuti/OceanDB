@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INCOIS ARGO CORE + BGC Real Data Explorer</title>
+    <meta name="description" content="Interactive SQL Portal for 6 Real INCOIS ARGO Floats in the Arabian Sea and Bay of Bengal with CORE and BGC observation data.">
+    
+    <!-- Google Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet Maps CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Plotly JS -->
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+
+    <!-- AlaSQL Engine -->
+    <script src="https://cdn.jsdelivr.net/npm/alasql@4"></script>
+
+    <!-- pako gzip decompressor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ocean: {
+                            900: '#061325',
+                            800: '#0b203c',
+                            700: '#102e54',
+                            600: '#164073',
+                            500: '#0077be',
+                            400: '#00a8e8',
+                            300: '#00d2ff',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #061325 0%, #0b203c 50%, #08192e 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(11, 32, 60, 0.65);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 210, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .glass-card {
+            background: rgba(16, 46, 84, 0.45);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 210, 255, 0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(6, 19, 37, 0.5);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(0, 168, 232, 0.3);
+            border-radius: 3px;
+        }
+        .leaflet-popup-content-wrapper {
+            background: #0b203c;
+            color: #e2e8f0;
+            border: 1px solid #00a8e8;
+            border-radius: 8px;
+        }
+        .leaflet-popup-tip {
+            background: #0b203c;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased">
+
+    <!-- Header -->
+    <header class="border-b border-ocean-700/50 bg-ocean-900/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-ocean-500 to-ocean-300 flex items-center justify-center text-xl font-bold shadow-lg shadow-ocean-500/20">
+                    🌊
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-indigo-300">
+                        INCOIS Real ARGO CORE + BGC Portal
+                    </h1>
+                    <p class="text-xs text-cyan-400/80">Arabian Sea & Bay of Bengal (6 INCOIS Floats)</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="px-3 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/50 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 6 Real Floats
+                </span>
+                <span class="px-3 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/50">
+                    1,086 Profiles
+                </span>
+                <span class="px-3 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/50">
+                    271,592 Records
+                </span>
+                <a href="stlite.html" class="px-3 py-1 rounded-full bg-gradient-to-r from-ocean-500 to-cyan-500 text-white font-medium hover:opacity-90 transition">
+                    Streamlit Wasm App ↗
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        
+        <!-- Loading Spinner Overlay -->
+        <div id="loading-overlay" class="fixed inset-0 bg-ocean-900/90 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 transition-opacity duration-300">
+            <div class="w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin"></div>
+            <div class="text-center">
+                <h3 class="text-lg font-semibold text-cyan-300">Loading 271,592 Real INCOIS Observations...</h3>
+                <p id="loading-progress" class="text-xs text-slate-400 mt-1">Downloading 3MB Gzipped Dataset...</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Sidebar / Control Panel (4 Cols) -->
+            <aside class="lg:col-span-4 space-y-6">
+                
+                <!-- Interactive Single Profile Widget -->
+                <div class="glass-panel rounded-2xl p-5 border border-cyan-500/20">
+                    <h2 class="text-sm font-semibold text-cyan-300 flex items-center gap-2 mb-3">
+                        🎯 Single Profile Interactive Selector
+                    </h2>
+                    <div class="space-y-3 text-xs">
+                        <div>
+                            <label class="block text-slate-400 mb-1">Select Float (WMO ID):</label>
+                            <select id="wmo-select" onchange="updateCycleOptions()" class="w-full bg-ocean-800 text-slate-200 border border-cyan-500/30 rounded-lg p-2 focus:outline-none focus:border-cyan-400">
+                                <option value="2902306">Float 2902306 (Arabian Sea BGC)</option>
+                                <option value="7902190">Float 7902190 (Bay of Bengal BGC)</option>
+                                <option value="2902093">Float 2902093 (Arabian Sea BGC)</option>
+                                <option value="2902086">Float 2902086 (Bay of Bengal BGC)</option>
+                                <option value="2902087">Float 2902087 (Bay of Bengal BGC)</option>
+                                <option value="2902092">Float 2902092 (Arabian Sea BGC)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">Select Cycle Number:</label>
+                            <select id="cycle-select" class="w-full bg-ocean-800 text-slate-200 border border-cyan-500/30 rounded-lg p-2 focus:outline-none focus:border-cyan-400">
+                            </select>
+                        </div>
+                        <button onclick="generateSingleProfileSQL()" class="w-full py-2 bg-gradient-to-r from-cyan-600 to-ocean-500 hover:from-cyan-500 hover:to-ocean-400 text-white font-medium rounded-lg shadow-md transition">
+                            Generate Single Profile SQL
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Pre-built Queries & SQL Editor -->
+                <div class="glass-panel rounded-2xl p-5 space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-cyan-300 mb-1.5">Load Example SQL Query:</label>
+                        <select id="template-select" onchange="loadQueryTemplate()" class="w-full bg-ocean-800 text-xs text-slate-200 border border-cyan-500/30 rounded-lg p-2 focus:outline-none focus:border-cyan-400">
+                            <option value="single_2902306">🎯 Single Profile: Arabian Sea BGC Float 2902306 (Cycle 10)</option>
+                            <option value="single_7902190">🎯 Single Profile: Bay of Bengal BGC Float 7902190 (Cycle 5)</option>
+                            <option value="single_2902093">🎯 Single Profile: Deep Oxygen Minimum Zone (Float 2902093, Cycle 50)</option>
+                            <option value="single_2902087">🎯 Single Profile: Chlorophyll Peak Profile (Float 2902087, Cycle 100)</option>
+                            <option value="single_latest">🎯 Single Profile: Latest Profile (Subquery Filter)</option>
+                            <option value="meta">1. Show Real INCOIS Float Metadata</option>
+                            <option value="profiles">2. Locate Float Profiles (Bay of Bengal & Arabian Sea)</option>
+                            <option value="surface">3. Surface Temperature & Salinity (JOIN)</option>
+                            <option value="omz">4. Oxygen Minimum Zone (Hypoxia Filter)</option>
+                            <option value="chla">5. Chlorophyll-a Bio-Optical Profiles</option>
+                            <option value="summary">6. Summary Aggregations by Float & Region</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1.5">SQL Query Window:</label>
+                        <textarea id="sql-editor" class="w-full h-48 bg-ocean-900/90 text-cyan-200 font-mono text-xs p-3 rounded-xl border border-cyan-500/30 focus:outline-none focus:border-cyan-400 leading-relaxed custom-scrollbar"></textarea>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button onclick="runSQLQuery()" class="flex-1 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs font-semibold rounded-xl shadow-lg transition">
+                            Run SQL Query
+                        </button>
+                        <button onclick="exportCSV()" class="px-4 py-2.5 bg-ocean-700 hover:bg-ocean-600 text-slate-200 text-xs font-medium rounded-xl border border-cyan-500/30 transition">
+                            Export CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Database Schema Reference -->
+                <div class="glass-panel rounded-2xl p-4 text-xs">
+                    <details class="group">
+                        <summary class="font-semibold text-cyan-300 cursor-pointer flex items-center justify-between">
+                            <span>Show Real Database Schema</span>
+                            <span class="group-open:rotate-180 transition-transform">▾</span>
+                        </summary>
+                        <div class="mt-3 space-y-2 text-slate-400 border-t border-ocean-700/50 pt-3">
+                            <p><strong class="text-slate-200">argo_floats</strong>: wmoid, platform_type, deployment_date, pi_name, region, status, total_profiles</p>
+                            <p><strong class="text-slate-200">argo_profiles</strong>: profile_id, wmoid, cycle, profile_date, latitude, longitude</p>
+                            <p><strong class="text-slate-200">argo_observations</strong>: obs_id, profile_id, wmoid, cycle, pressure_dbar, temperature_c, salinity_psu, dissolved_oxygen_umol, chlorophyll_a_mg_m3, backscatter_bbp700</p>
+                        </div>
+                    </details>
+                </div>
+
+            </aside>
+
+            <!-- Main Content Display (8 Cols) -->
+            <section class="lg:col-span-8 space-y-6">
+                
+                <!-- Status Banner -->
+                <div id="status-banner" class="glass-panel rounded-2xl p-4 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between">
+                    <span>Query Ready</span>
+                    <span id="record-count" class="font-mono bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800">0 records</span>
+                </div>
+
+                <!-- Tabs Header -->
+                <div class="flex border-b border-ocean-700/60 gap-2 text-sm font-medium">
+                    <button onclick="switchTab('table')" id="tab-btn-table" class="px-4 py-2 text-cyan-400 border-b-2 border-cyan-400 transition">
+                        📊 Data Table
+                    </button>
+                    <button onclick="switchTab('map')" id="tab-btn-map" class="px-4 py-2 text-slate-400 border-b-2 border-transparent hover:text-cyan-300 transition">
+                        🗺️ Geographic Map
+                    </button>
+                    <button onclick="switchTab('profiles')" id="tab-btn-profiles" class="px-4 py-2 text-slate-400 border-b-2 border-transparent hover:text-cyan-300 transition">
+                        📉 Vertical CTD & BGC Profiles
+                    </button>
+                </div>
+
+                <!-- Tab 1: Data Table -->
+                <div id="tab-table" class="glass-panel rounded-2xl p-4 space-y-4">
+                    <div class="overflow-x-auto max-h-[550px] custom-scrollbar">
+                        <table id="data-table" class="w-full text-xs text-left text-slate-300">
+                            <thead class="text-xs uppercase bg-ocean-800 text-cyan-300 sticky top-0 z-10">
+                                <tr id="table-head"></tr>
+                            </thead>
+                            <tbody id="table-body" class="divide-y divide-ocean-700/50"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Map -->
+                <div id="tab-map" class="glass-panel rounded-2xl p-4 hidden">
+                    <div id="map" class="w-full h-[550px] rounded-xl z-0"></div>
+                </div>
+
+                <!-- Tab 3: Profiles -->
+                <div id="tab-profiles" class="glass-panel rounded-2xl p-4 hidden space-y-6">
+                    <div id="chart-temp" class="w-full h-[400px]"></div>
+                    <div id="chart-sal" class="w-full h-[400px]"></div>
+                    <div id="chart-doxy" class="w-full h-[400px]"></div>
+                    <div id="chart-chla" class="w-full h-[400px]"></div>
+                </div>
+
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Application Logic Script -->
+    <script>
+        let dbFloats = [];
+        let dbProfiles = [];
+        let dbObs = [];
+        let currentQueryResult = [];
+        let mapInstance = null;
+
+        const templates = {
+            single_2902306: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.dissolved_oxygen_umol, o.chlorophyll_a_mg_m3, o.backscatter_bbp700 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = 2902306 AND p.cycle = 10 ORDER BY o.pressure_dbar ASC;`,
+            single_7902190: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.dissolved_oxygen_umol, o.chlorophyll_a_mg_m3 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = 7902190 AND p.cycle = 5 ORDER BY o.pressure_dbar ASC;`,
+            single_2902093: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.dissolved_oxygen_umol FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = 2902093 AND p.cycle = 50 ORDER BY o.pressure_dbar ASC;`,
+            single_2902087: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.chlorophyll_a_mg_m3, o.backscatter_bbp700 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = 2902087 AND p.cycle = 100 ORDER BY o.pressure_dbar ASC;`,
+            single_latest: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.dissolved_oxygen_umol, o.chlorophyll_a_mg_m3 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = 2902306 AND p.cycle = 86 ORDER BY o.pressure_dbar ASC;`,
+            meta: `SELECT wmoid, platform_type, deployment_date, pi_name, region, status, total_profiles FROM argo_floats ORDER BY wmoid ASC;`,
+            profiles: `SELECT profile_id, wmoid, cycle, profile_date, latitude, longitude FROM argo_profiles ORDER BY wmoid, cycle ASC;`,
+            surface: `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE o.pressure_dbar <= 10.0 ORDER BY o.temperature_c DESC;`,
+            omz: `SELECT p.wmoid, f.region, p.latitude, p.longitude, o.pressure_dbar, o.dissolved_oxygen_umol FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE o.dissolved_oxygen_umol IS NOT NULL AND o.dissolved_oxygen_umol < 40.0 AND o.pressure_dbar BETWEEN 100 AND 800 ORDER BY o.dissolved_oxygen_umol ASC;`,
+            chla: `SELECT p.wmoid, f.region, p.cycle, p.latitude, p.longitude, o.pressure_dbar, o.chlorophyll_a_mg_m3, o.backscatter_bbp700 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE o.chlorophyll_a_mg_m3 IS NOT NULL ORDER BY o.chlorophyll_a_mg_m3 DESC;`,
+            summary: `SELECT f.wmoid, f.platform_type, f.region, COUNT(DISTINCT p.profile_id) AS total_profiles, MIN(p.profile_date) AS first_date, MAX(p.profile_date) AS last_date FROM argo_floats f LEFT JOIN argo_profiles p ON f.wmoid = p.wmoid GROUP BY f.wmoid, f.platform_type, f.region;`
+        };
+
+        async function initApp() {
+            try {
+                // 1. Fetch metadata
+                const metaResp = await fetch('./data_summary.json');
+                const metaData = await metaResp.json();
+                dbFloats = metaData.floats;
+                dbProfiles = metaData.profiles;
+
+                document.getElementById('loading-progress').innerText = "Decompressing 271,592 Observations (3MB Gzip)...";
+
+                // 2. Fetch Gzipped Observations CSV & Decompress
+                const csvResp = await fetch('./incois_real_6floats_core_bgc.csv.gz');
+                const arrayBuffer = await csvResp.arrayBuffer();
+                const decompressed = pako.inflate(new Uint8Array(arrayBuffer), { to: 'string' });
+
+                // 3. Register Tables in AlaSQL Engine
+                document.getElementById('loading-progress').innerText = "Registering In-Browser SQL Tables...";
+                
+                alasql("CREATE TABLE argo_floats");
+                alasql.tables.argo_floats.data = dbFloats;
+
+                alasql("CREATE TABLE argo_profiles");
+                alasql.tables.argo_profiles.data = dbProfiles;
+
+                const parsedObs = alasql.parse('SELECT * FROM CSV(?, {headers:true})', [decompressed]);
+                dbObs = alasql(parsedObs[0]);
+                
+                // Convert numeric strings to numbers
+                dbObs.forEach(r => {
+                    r.obs_id = Number(r.obs_id);
+                    r.profile_id = Number(r.profile_id);
+                    r.wmoid = Number(r.wmoid);
+                    r.cycle = Number(r.cycle);
+                    r.latitude = Number(r.latitude);
+                    r.longitude = Number(r.longitude);
+                    r.pressure_dbar = r.pressure_dbar !== "" ? Number(r.pressure_dbar) : null;
+                    r.temperature_c = r.temperature_c !== "" ? Number(r.temperature_c) : null;
+                    r.salinity_psu = r.salinity_psu !== "" ? Number(r.salinity_psu) : null;
+                    r.dissolved_oxygen_umol = r.dissolved_oxygen_umol !== "" ? Number(r.dissolved_oxygen_umol) : null;
+                    r.chlorophyll_a_mg_m3 = r.chlorophyll_a_mg_m3 !== "" ? Number(r.chlorophyll_a_mg_m3) : null;
+                    r.backscatter_bbp700 = r.backscatter_bbp700 !== "" ? Number(r.backscatter_bbp700) : null;
+                });
+
+                alasql("CREATE TABLE argo_observations");
+                alasql.tables.argo_observations.data = dbObs;
+
+                // Hide loading overlay
+                document.getElementById('loading-overlay').classList.add('opacity-0', 'pointer-events-none');
+                
+                updateCycleOptions();
+                loadQueryTemplate();
+                runSQLQuery();
+
+            } catch (err) {
+                console.error("Initialization Error:", err);
+                document.getElementById('loading-progress').innerText = "Error loading dataset: " + err.message;
+            }
+        }
+
+        function updateCycleOptions() {
+            const wmo = Number(document.getElementById('wmo-select').value);
+            const profiles = dbProfiles.filter(p => p.wmoid === wmo);
+            const cycles = [...new Set(profiles.map(p => p.cycle))].sort((a,b) => a - b);
+            
+            const sel = document.getElementById('cycle-select');
+            sel.innerHTML = '';
+            cycles.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.innerText = `Cycle ${c}`;
+                sel.appendChild(opt);
+            });
+            if (cycles.length > 0) sel.value = cycles[0];
+        }
+
+        function generateSingleProfileSQL() {
+            const wmo = document.getElementById('wmo-select').value;
+            const cycle = document.getElementById('cycle-select').value;
+            
+            const sql = `SELECT p.wmoid, f.region, p.cycle, p.profile_date, p.latitude, p.longitude, o.pressure_dbar, o.temperature_c, o.salinity_psu, o.dissolved_oxygen_umol, o.chlorophyll_a_mg_m3, o.backscatter_bbp700 FROM argo_profiles p JOIN argo_observations o ON p.profile_id = o.profile_id JOIN argo_floats f ON p.wmoid = f.wmoid WHERE p.wmoid = ${wmo} AND p.cycle = ${cycle} ORDER BY o.pressure_dbar ASC;`;
+            document.getElementById('sql-editor').value = sql;
+            runSQLQuery();
+        }
+
+        function loadQueryTemplate() {
+            const key = document.getElementById('template-select').value;
+            document.getElementById('sql-editor').value = templates[key] || templates.single_2902306;
+        }
+
+        function runSQLQuery() {
+            const sql = document.getElementById('sql-editor').value.trim();
+            try {
+                const res = alasql(sql);
+                currentQueryResult = Array.isArray(res) ? res : [];
+                
+                document.getElementById('record-count').innerText = `${currentQueryResult.length.toLocaleString()} record(s)`;
+                renderTable(currentQueryResult);
+                renderMap(currentQueryResult);
+                renderProfiles(currentQueryResult);
+            } catch (e) {
+                alert("SQL Error: " + e.message);
+            }
+        }
+
+        function renderTable(data) {
+            const head = document.getElementById('table-head');
+            const body = document.getElementById('table-body');
+            head.innerHTML = '';
+            body.innerHTML = '';
+
+            if (data.length === 0) {
+                body.innerHTML = '<tr><td class="p-4 text-center text-slate-500">No records returned.</td></tr>';
+                return;
+            }
+
+            const cols = Object.keys(data[0]);
+            cols.forEach(c => {
+                const th = document.createElement('th');
+                th.className = 'p-3 border-b border-ocean-700/50 font-semibold';
+                th.innerText = c;
+                head.appendChild(th);
+            });
+
+            // Limit rendered rows to first 250 for smooth performance
+            data.slice(0, 250).forEach(r => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-ocean-800/50 transition';
+                cols.forEach(c => {
+                    const td = document.createElement('td');
+                    td.className = 'p-3 font-mono text-[11px] text-slate-300';
+                    const val = r[c];
+                    td.innerText = (val !== null && val !== undefined) ? val : '-';
+                    tr.appendChild(td);
+                });
+                body.appendChild(tr);
+            });
+        }
+
+        function renderMap(data) {
+            if (!mapInstance) {
+                mapInstance = L.map('map', { zoomControl: true }).setView([15.0, 75.0], 5);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; OpenStreetMap &copy; CARTO',
+                    maxZoom: 18
+                }).addTo(mapInstance);
+            }
+
+            // Clear markers
+            mapInstance.eachLayer(l => {
+                if (l instanceof L.CircleMarker) mapInstance.removeLayer(l);
+            });
+
+            const hasLat = data.length > 0 && ('latitude' in data[0] || 'LATITUDE' in data[0]);
+            const hasLon = data.length > 0 && ('longitude' in data[0] || 'LONGITUDE' in data[0]);
+
+            if (!hasLat || !hasLon) return;
+
+            const latKey = 'latitude' in data[0] ? 'latitude' : 'LATITUDE';
+            const lonKey = 'longitude' in data[0] ? 'longitude' : 'LONGITUDE';
+
+            const bounds = [];
+            data.forEach(r => {
+                const lat = r[latKey];
+                const lon = r[lonKey];
+                if (lat && lon) {
+                    const marker = L.circleMarker([lat, lon], {
+                        radius: 6,
+                        fillColor: '#00d2ff',
+                        color: '#0077be',
+                        weight: 1,
+                        opacity: 0.9,
+                        fillOpacity: 0.7
+                    }).addTo(mapInstance);
+
+                    const popupContent = `
+                        <div class="text-xs space-y-1">
+                            <strong class="text-cyan-400">Float ${r.wmoid || 'INCOIS'}</strong><br/>
+                            Cycle: ${r.cycle || '-'}<br/>
+                            Date: ${r.profile_date || '-'}<br/>
+                            Lat/Lon: ${lat.toFixed(3)}, ${lon.toFixed(3)}
+                        </div>
+                    `;
+                    marker.bindPopup(popupContent);
+                    bounds.push([lat, lon]);
+                }
+            });
+
+            if (bounds.length > 0) {
+                mapInstance.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+            }
+        }
+
+        function renderProfiles(data) {
+            const hasPres = data.length > 0 && ('pressure_dbar' in data[0]);
+            if (!hasPres) return;
+
+            const pres = data.map(r => r.pressure_dbar);
+            const wmos = data.map(r => r.wmoid ? String(r.wmoid) : 'Profile');
+
+            const layoutBase = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(11, 32, 60, 0.4)',
+                font: { color: '#e2e8f0', family: 'Outfit' },
+                yaxis: { title: 'Pressure (dbar) ~ Depth', autorange: 'reversed', gridcolor: 'rgba(0,168,232,0.1)' },
+                xaxis: { gridcolor: 'rgba(0,168,232,0.1)' },
+                margin: { l: 60, r: 20, t: 40, b: 40 }
+            };
+
+            // 1. Temp Profile
+            if ('temperature_c' in data[0]) {
+                Plotly.newPlot('chart-temp', [{
+                    x: data.map(r => r.temperature_c),
+                    y: pres,
+                    mode: 'lines+markers',
+                    marker: { size: 4, color: '#ff6b6b' },
+                    line: { color: '#ff6b6b', width: 2 }
+                }], { ...layoutBase, title: 'Vertical Temperature Profile (°C)', xaxis: { title: 'Temperature (°C)' } });
+            }
+
+            // 2. Salinity Profile
+            if ('salinity_psu' in data[0]) {
+                Plotly.newPlot('chart-sal', [{
+                    x: data.map(r => r.salinity_psu),
+                    y: pres,
+                    mode: 'lines+markers',
+                    marker: { size: 4, color: '#4ecdc4' },
+                    line: { color: '#4ecdc4', width: 2 }
+                }], { ...layoutBase, title: 'Vertical Salinity Profile (PSU)', xaxis: { title: 'Salinity (PSU)' } });
+            }
+
+            // 3. Oxygen Profile
+            if ('dissolved_oxygen_umol' in data[0]) {
+                Plotly.newPlot('chart-doxy', [{
+                    x: data.map(r => r.dissolved_oxygen_umol),
+                    y: pres,
+                    mode: 'lines+markers',
+                    marker: { size: 4, color: '#45b7d1' },
+                    line: { color: '#45b7d1', width: 2 }
+                }], { ...layoutBase, title: 'BGC Dissolved Oxygen Profile (μmol/kg)', xaxis: { title: 'Dissolved Oxygen (μmol/kg)' } });
+            }
+
+            // 4. Chlorophyll Profile
+            if ('chlorophyll_a_mg_m3' in data[0]) {
+                Plotly.newPlot('chart-chla', [{
+                    x: data.map(r => r.chlorophyll_a_mg_m3),
+                    y: pres,
+                    mode: 'lines+markers',
+                    marker: { size: 4, color: '#96ceb4' },
+                    line: { color: '#96ceb4', width: 2 }
+                }], { ...layoutBase, title: 'BGC Chlorophyll-a Profile (mg/m³)', xaxis: { title: 'Chlorophyll-a (mg/m³)' } });
+            }
+        }
+
+        function switchTab(tab) {
+            ['table', 'map', 'profiles'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.add('hidden');
+                document.getElementById(`tab-btn-${t}`).className = 'px-4 py-2 text-slate-400 border-b-2 border-transparent hover:text-cyan-300 transition';
+            });
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            document.getElementById(`tab-btn-${tab}`).className = 'px-4 py-2 text-cyan-400 border-b-2 border-cyan-400 transition';
+            
+            if (tab === 'map' && mapInstance) {
+                setTimeout(() => mapInstance.invalidateSize(), 200);
+            }
+        }
+
+        function exportCSV() {
+            if (currentQueryResult.length === 0) return;
+            const csv = alasql('SELECT * FROM ?', [currentQueryResult]);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'incois_argo_export.csv';
+            a.click();
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
