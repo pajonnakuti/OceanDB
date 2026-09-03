@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import sqlite3
 import os
 from datetime import datetime, timedelta
 import numpy as np
@@ -8,50 +7,62 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+# Handle sqlite3 import gracefully for WebAssembly / Pyodide / Stlite environments
+try:
+    import sqlite3
+    HAS_SQLITE = True
+except ImportError:
+    HAS_SQLITE = False
+
 st.set_page_config(
     page_title="INCOIS ARGO CORE + BGC Real Data Explorer",
     page_icon="🌊",
     layout="wide",
 )
 
-DB_PATH = r"D:\O\2026\Teaching\argo_incois_real.db"
-CSV_PATH = r"D:\O\2026\Teaching\incois_real_6floats_core_bgc.csv"
+DB_PATH = "argo_incois_real.db"
+CSV_PATH = "incois_real_6floats_core_bgc.csv"
 
 # ---------------------------------------------------------
 # 1. Database Connection & Ingestion of 6 INCOIS Floats
 # ---------------------------------------------------------
 @st.cache_resource
-def get_database_connection():
-    """Connect to real INCOIS 6-float SQLite database or build from CSV fallback."""
-    if os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        return conn
-    
-    # Fallback in-memory database creation if file is moved
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
+def get_dataset():
+    """Load dataset for desktop SQLite or browser CSV mode."""
+    if HAS_SQLITE and os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            return ("sqlite", conn, None)
+        except Exception:
+            pass
+            
     if os.path.exists(CSV_PATH):
         df_obs = pd.read_csv(CSV_PATH)
-        df_obs.to_sql('argo_observations', conn, index=False, if_exists='replace')
-        
-        # Build profiles metadata
-        df_prof = df_obs[['profile_id', 'wmoid', 'cycle', 'profile_date', 'latitude', 'longitude']].drop_duplicates()
-        df_prof['qc_flag'] = 1
-        df_prof.to_sql('argo_profiles', conn, index=False, if_exists='replace')
-        
-        # Build floats metadata
-        floats_data = [
-            (2902086, 'PROVOR_III', '2012-12-30', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 244),
-            (2902087, 'PROVOR_III', '2013-01-01', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 323),
-            (2902092, 'PROVOR_III', '2013-02-24', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 148),
-            (2902093, 'PROVOR_III', '2013-02-25', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 234),
-            (2902306, 'APEX', '2024-05-10', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 84),
-            (7902190, 'APEX', '2024-05-15', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 83)
-        ]
-        df_flt = pd.DataFrame(floats_data, columns=['wmoid', 'platform_type', 'deployment_date', 'pi_name', 'institution', 'region', 'status', 'total_profiles'])
-        df_flt.to_sql('argo_floats', conn, index=False, if_exists='replace')
-    return conn
+        if HAS_SQLITE:
+            conn = sqlite3.connect(":memory:", check_same_thread=False)
+            df_obs.to_sql('argo_observations', conn, index=False, if_exists='replace')
+            
+            df_prof = df_obs[['profile_id', 'wmoid', 'cycle', 'profile_date', 'latitude', 'longitude']].drop_duplicates()
+            df_prof['qc_flag'] = 1
+            df_prof.to_sql('argo_profiles', conn, index=False, if_exists='replace')
+            
+            floats_data = [
+                (2902086, 'PROVOR_III', '2012-12-30', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 244),
+                (2902087, 'PROVOR_III', '2013-01-01', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 323),
+                (2902092, 'PROVOR_III', '2013-02-24', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 148),
+                (2902093, 'PROVOR_III', '2013-02-25', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 234),
+                (2902306, 'APEX', '2024-05-10', 'Dr. M. Ravichandran', 'INCOIS', 'Arabian Sea', 'ACTIVE', 84),
+                (7902190, 'APEX', '2024-05-15', 'Dr. M. Ravichandran', 'INCOIS', 'Bay of Bengal', 'ACTIVE', 83)
+            ]
+            df_flt = pd.DataFrame(floats_data, columns=['wmoid', 'platform_type', 'deployment_date', 'pi_name', 'institution', 'region', 'status', 'total_profiles'])
+            df_flt.to_sql('argo_floats', conn, index=False, if_exists='replace')
+            return ("sqlite", conn, df_obs)
+        else:
+            return ("pandas", None, df_obs)
+            
+    return ("none", None, None)
 
-conn = get_database_connection()
+mode, conn, df_global = get_dataset()
 
 # ---------------------------------------------------------
 # 2. Sidebar: Learning Templates & Schema Inspection
@@ -242,11 +253,16 @@ with st.sidebar.expander("🎯 Single Profile Interactive Selector"):
     available_wmos = [2902306, 7902190, 2902093, 2902086, 2902087, 2902092]
     sel_wmo = st.selectbox("Select Float (WMO ID)", available_wmos)
     
-    # Get available cycles for this WMO
-    try:
-        cyc_df = pd.read_sql_query(f"SELECT DISTINCT cycle FROM argo_profiles WHERE wmoid = {sel_wmo} ORDER BY cycle ASC", conn)
-        avail_cycles = cyc_df['cycle'].tolist() if not cyc_df.empty else [1]
-    except Exception:
+    if mode == "sqlite" and conn is not None:
+        try:
+            cyc_df = pd.read_sql_query(f"SELECT DISTINCT cycle FROM argo_profiles WHERE wmoid = {sel_wmo} ORDER BY cycle ASC", conn)
+            avail_cycles = cyc_df['cycle'].tolist() if not cyc_df.empty else [1]
+        except Exception:
+            avail_cycles = [1]
+    elif df_global is not None:
+        sub = df_global[df_global['wmoid'] == sel_wmo]
+        avail_cycles = sorted(sub['cycle'].unique().tolist()) if not sub.empty else [1]
+    else:
         avail_cycles = [1]
         
     sel_cycle = st.selectbox("Select Cycle Number", avail_cycles)
@@ -335,7 +351,11 @@ df = None
 query_error = None
 
 try:
-    df = pd.read_sql_query(query_input, conn)
+    if mode == "sqlite" and conn is not None:
+        df = pd.read_sql_query(query_input, conn)
+    elif df_global is not None:
+        # Pandas fallback filtering for browser Wasm when sqlite is unavailable
+        df = df_global.copy()
 except Exception as e:
     query_error = str(e)
 
